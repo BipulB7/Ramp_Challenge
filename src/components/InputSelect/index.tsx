@@ -1,5 +1,5 @@
 import Downshift from "downshift"
-import { useCallback, useState } from "react"
+import { useCallback, useState, useEffect, useRef } from "react"
 import classNames from "classnames"
 import { DropdownPosition, GetDropdownPositionFn, InputSelectOnChange, InputSelectProps } from "./types"
 
@@ -17,25 +17,63 @@ export function InputSelect<TItem>({
     top: 0,
     left: 0,
   })
+  // trackking dropdown open state to update the position on scroll
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const inputRef = useRef<HTMLDivElement>(null)
 
   const onChange = useCallback<InputSelectOnChange<TItem>>(
     (selectedItem) => {
       if (selectedItem === null) {
         return
       }
-
-      consumerOnChange(selectedItem)
-      setSelectedValue(selectedItem)
+      // if employee id is empty,  assign a special id "all"
+      const parsed = parseItem(selectedItem)
+      if (!parsed.value || parsed.value.trim() === "") {
+        //  new object from selectedItem with id "all"
+        const modifiedItem = { ...selectedItem, id: "all" }
+        consumerOnChange(modifiedItem)
+        setSelectedValue(modifiedItem)
+        //  if "all" employees is selected, show all transactions off bat (might have to click view more)
+        if (modifiedItem.id === "all") {
+          window.dispatchEvent(new Event("resetPagination"))
+        }
+      } else {
+        consumerOnChange(selectedItem)
+        setSelectedValue(selectedItem)
+      }
     },
-    [consumerOnChange]
+    [consumerOnChange, parseItem]
   )
+
+  //  updating dropdown position on scroll if open
+  useEffect(() => {
+    const handleScroll = () => {
+      if (inputRef.current) {
+        setDropdownPosition(getDropdownPosition(inputRef.current))
+      }
+    }
+
+    if (isDropdownOpen) {
+      window.addEventListener("scroll", handleScroll)
+    }
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll)
+    }
+  }, [isDropdownOpen])
 
   return (
     <Downshift<TItem>
       id="RampSelect"
+      // keeping track of the dropdown open state
+      onStateChange={(changes) => {
+        if (typeof changes.isOpen === "boolean") {
+          setIsDropdownOpen(changes.isOpen)
+        }
+      }}
       onChange={onChange}
       selectedItem={selectedValue}
-      itemToString={(item) => (item ? parseItem(item).label : "")}
+      itemToString={(item) => (item ? parseItem(item).label : "All Employees")}
     >
       {({
         getItemProps,
@@ -48,7 +86,8 @@ export function InputSelect<TItem>({
         inputValue,
       }) => {
         const toggleProps = getToggleButtonProps()
-        const parsedSelectedItem = selectedItem === null ? null : parseItem(selectedItem)
+        const parsedSelectedItem =
+          selectedItem === null ? null : parseItem(selectedItem)
 
         return (
           <div className="RampInputSelect--root">
@@ -56,10 +95,14 @@ export function InputSelect<TItem>({
               {label}
             </label>
             <div className="RampBreak--xs" />
+            {/*  ref to the input element */}
             <div
               className="RampInputSelect--input"
+              ref={inputRef}
               onClick={(event) => {
-                setDropdownPosition(getDropdownPosition(event.target))
+                //  ref when calculating position
+                const targetElement = inputRef.current || event.target
+                setDropdownPosition(getDropdownPosition(targetElement))
                 toggleProps.onClick(event)
               }}
             >
@@ -71,7 +114,12 @@ export function InputSelect<TItem>({
                 "RampInputSelect--dropdown-container-opened": isOpen,
               })}
               {...getMenuProps()}
-              style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
+              // make sure the container is  positioned so that we can update top and left
+              style={{
+                position: "absolute",
+                top: dropdownPosition.top,
+                left: dropdownPosition.left,
+              }}
             >
               {renderItems()}
             </div>

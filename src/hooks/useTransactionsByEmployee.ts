@@ -1,29 +1,31 @@
 import { useCallback, useState } from "react"
-import { RequestByEmployeeParams, Transaction } from "../utils/types"
-import { TransactionsByEmployeeResult } from "./types"
+import { Transaction } from "../utils/types"
 import { useCustomFetch } from "./useCustomFetch"
 
-export function useTransactionsByEmployee(): TransactionsByEmployeeResult {
+export function useTransactionsByEmployee() {
   const { fetchWithCache, loading } = useCustomFetch()
-  const [transactionsByEmployee, setTransactionsByEmployee] = useState<Transaction[] | null>(null)
+  const [transactions, setTransactions] = useState<Transaction[] | null>(null)
 
-  const fetchById = useCallback(
-    async (employeeId: string) => {
-      const data = await fetchWithCache<Transaction[], RequestByEmployeeParams>(
-        "transactionsByEmployee",
-        {
-          employeeId,
-        }
-      )
-
-      setTransactionsByEmployee(data)
-    },
-    [fetchWithCache]
-  )
+  const fetchById = useCallback(async (employeeId: string) => {
+    const response = await fetchWithCache<Transaction[], { employeeId: string }>(
+      "transactionsByEmployee",
+      { employeeId }
+    )
+    setTransactions(response)
+  }, [fetchWithCache])
 
   const invalidateData = useCallback(() => {
-    setTransactionsByEmployee(null)
+    setTransactions(null)
   }, [])
 
-  return { data: transactionsByEmployee, loading, fetchById, invalidateData }
+  const updateTransactionApproval = useCallback((transactionId: string, newValue: boolean) => {
+    setTransactions((prev) => {
+      if (!prev) return prev
+      return prev.map((tx) =>
+        tx.id === transactionId ? { ...tx, approved: newValue } : tx
+      )
+    })
+  }, [])
+
+  return { data: transactions, loading, fetchById, invalidateData, updateTransactionApproval }
 }

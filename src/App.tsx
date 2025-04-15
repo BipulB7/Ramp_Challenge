@@ -10,38 +10,73 @@ import { Employee } from "./utils/types"
 
 export function App() {
   const { data: employees, ...employeeUtils } = useEmployees()
-  const { data: paginatedTransactions, ...paginatedTransactionsUtils } = usePaginatedTransactions()
-  const { data: transactionsByEmployee, ...transactionsByEmployeeUtils } = useTransactionsByEmployee()
+  const {
+    data: paginatedTransactions,
+    updateTransactionApproval: updatePaginatedTransactionApproval,
+    ...paginatedTransactionsUtils
+  } = usePaginatedTransactions()
+  const {
+    data: transactionsByEmployee,
+    updateTransactionApproval: updateEmployeeTransactionApproval,
+    ...transactionsByEmployeeUtils
+  } = useTransactionsByEmployee()
   const [isLoading, setIsLoading] = useState(false)
 
-  const transactions = useMemo(
-    () => paginatedTransactions?.data ?? transactionsByEmployee ?? null,
-    [paginatedTransactions, transactionsByEmployee]
+  // tores toggled approval values keyed by transactionId
+  const [approvalOverrides, setApprovalOverrides] = useState<Record<string, boolean>>({})
+
+  //  transactions from paginated or employee-specific data
+  const transactions = useMemo(() => {
+    return paginatedTransactions?.data ?? transactionsByEmployee ?? null
+  }, [paginatedTransactions, transactionsByEmployee])
+
+  // updated both hook states and the approval override
+  const aggregatedUpdateTransactionApproval = useCallback(
+    (transactionId: string, newValue: boolean) => {
+      updateEmployeeTransactionApproval(transactionId, newValue)
+      updatePaginatedTransactionApproval(transactionId, newValue)
+      setApprovalOverrides((prev) => ({ ...prev, [transactionId]: newValue }))
+    },
+    [updateEmployeeTransactionApproval, updatePaginatedTransactionApproval]
   )
 
-  const loadAllTransactions = useCallback(async () => {
+  // 1st load of transactions or full resett
+  const loadInitialTransactions = useCallback(async () => {
     setIsLoading(true)
+    // when loading initial data clear employee-specific data.
     transactionsByEmployeeUtils.invalidateData()
 
-    await employeeUtils.fetchAll()
+    // fetch employee data if needed
+    if (!employees) {
+      await employeeUtils.fetchAll()
+    }
+
+    //  first page of paginated transactions 
     await paginatedTransactionsUtils.fetchAll()
-
     setIsLoading(false)
-  }, [employeeUtils, paginatedTransactionsUtils, transactionsByEmployeeUtils])
+  }, [employees, employeeUtils, paginatedTransactionsUtils, transactionsByEmployeeUtils])
 
-  const loadTransactionsByEmployee = useCallback(
-    async (employeeId: string) => {
-      paginatedTransactionsUtils.invalidateData()
-      await transactionsByEmployeeUtils.fetchById(employeeId)
-    },
-    [paginatedTransactionsUtils, transactionsByEmployeeUtils]
-  )
+  // transactions by employee filter
+  const loadTransactionsByEmployee = useCallback(async (employeeId: string) => {
+    // clearing paginated transactions
+    paginatedTransactionsUtils.invalidateData()
+
+    // transactions for the selected employee.
+    await transactionsByEmployeeUtils.fetchById(employeeId)
+  }, [paginatedTransactionsUtils, transactionsByEmployeeUtils])
+
+  // function to load more transactions (for pagination)
+  const loadMoreTransactions = useCallback(async () => {
+    setIsLoading(true)
+    await paginatedTransactionsUtils.fetchNextPage()
+    setIsLoading(false)
+  }, [paginatedTransactionsUtils])
 
   useEffect(() => {
     if (employees === null && !employeeUtils.loading) {
-      loadAllTransactions()
+      loadInitialTransactions()
     }
-  }, [employeeUtils.loading, employees, loadAllTransactions])
+  }, [employeeUtils.loading, employees, loadInitialTransactions])
 
   return (
     <Fragment>
@@ -60,30 +95,48 @@ export function App() {
             value: item.id,
             label: `${item.firstName} ${item.lastName}`,
           })}
+         
+          // fetch only paginated transactions (employees are already loaded)
           onChange={async (newValue) => {
             if (newValue === null) {
               return
             }
+            if (newValue.id === "all") {
+            
+              transactionsByEmployeeUtils.invalidateData()
 
-            await loadTransactionsByEmployee(newValue.id)
+              if (!paginatedTransactions) {
+                setIsLoading(true)
+                await paginatedTransactionsUtils.fetchAll()
+                setIsLoading(false)
+              }
+            } else {
+              await loadTransactionsByEmployee(newValue.id)
+            }
           }}
         />
 
         <div className="RampBreak--l" />
 
         <div className="RampGrid">
-          <Transactions transactions={transactions} />
+          <Transactions
+            transactions={transactions}
+            updateTransactionApproval={aggregatedUpdateTransactionApproval}
+            approvalOverrides={approvalOverrides}
+          />
 
-          {transactions !== null && (
-            <button
-              className="RampButton"
-              disabled={paginatedTransactionsUtils.loading}
-              onClick={async () => {
-                await loadAllTransactions()
-              }}
-            >
-              View More
-            </button>
+          {paginatedTransactions &&
+            paginatedTransactions.nextPage != null &&
+            !transactionsByEmployee && (
+              <button
+                className="RampButton"
+                disabled={paginatedTransactionsUtils.loading}
+                onClick={async () => {
+                  await loadMoreTransactions()
+                }}
+              >
+                View More
+              </button>
           )}
         </div>
       </main>
